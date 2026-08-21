@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  email            String    @unique
+  password         String
+  firstName        String?
+  lastName         String?
+  role             Role      @default(USER)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdFactories Factory[] @relation("CreatedFactories")
+  managedFactories Factory[] @relation("ManagedFactories")
+  biaReports       BiaReport[] @relation("AuthoredBiaReports")
+
+  @@map("users")
+}
+
+model Factory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  code        String   @unique
+  description String?
+  city        String?
+  country     String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdById String?  @db.ObjectId
+  managerId   String?  @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  manager   User? @relation("ManagedFactories", fields: [managerId], references: [id])
+  createdBy User? @relation("CreatedFactories", fields: [createdById], references: [id])
+  processes Process[]
+
+  @@map("factories")
+}
+
+model Process {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  name             String
+  description      String?
+  department       String?
+  processOwner     String?
+  location         String?
+  impact           String?
+  criticality      String
+  rto              Int      @default(24)
+  mtpd             Int      @default(72)
+  rpo              Int      @default(4)
+  mbco             String?  @default("50%")
+  factoryId        String?  @db.ObjectId
+  activitesCritiques Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  factory Factory? @relation(fields: [factoryId], references: [id])
+
+  @@map("processes")
+}
+
+model BiaReport {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  name                String
+  description         String?
+  format              String
+  status              String
+  totalProcesses      Int
+  continuityLevel     Int
+  recommendationCount Int
+  reportData          Json?
+  includedProcessIds  String[]
+  factoryId           String?  @db.ObjectId
+  authorId            String   @db.ObjectId
+  shareToken          String   @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  author User @relation("AuthoredBiaReports", fields: [authorId], references: [id])
+
+  @@map("bia_reports")
+}
+
+model ContinuityGap {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  processId      String?  @db.ObjectId
+  factoryId      String?  @db.ObjectId
+  currentValue   Int?
+  targetValue    Int?
+  description    String?
+  recommendation String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("continuity_gaps")
+}
+
+model ContinuityStrategy {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  description     String?
+  resourceCategory String
+  status          String
+  processId       String?  @db.ObjectId
+  factoryId       String?  @db.ObjectId
+  resourceDetails Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("continuity_strategies")
+}
