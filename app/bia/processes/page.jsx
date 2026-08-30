@@ -31,6 +31,10 @@ export default function ProcessesPage() {
   const [isModalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
+  const [recovery, setRecovery] = useState(null)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryError, setRecoveryError] = useState('')
+  const [details, setDetails] = useState(null)
   const getFactoryById = (id) => factories.find((factory) => factory.id === id)
 
   useEffect(() => {
@@ -60,6 +64,32 @@ export default function ProcessesPage() {
     setModalOpen(true)
   }
 
+  function openDetails(process) { setDetails(process) }
+
+  async function openRecovery(process) {
+    setRecovery({ process, result: null, proposal: null }); setRecoveryError(''); setRecoveryBusy(true)
+    try {
+      const response = await fetch('/api/ai/recovery-metrics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ processId: process.id }) })
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || payload.error || 'Calcul impossible')
+      setRecovery((current) => ({ ...current, result: payload.data, proposal: payload.data.proposal }))
+    } catch (e) { setRecoveryError(e.message) } finally { setRecoveryBusy(false) }
+  }
+
+  async function saveRecovery(status) {
+    setRecoveryBusy(true); setRecoveryError('')
+    try {
+      if (status === 'REJECTED') { setRecovery(null); return }
+      if (status === 'HUMAN_REVIEW') { setRecoveryError('La proposition reste affichée pour revue. Approuvez-la pour modifier le processus.'); return }
+      if (status === 'APPROVED') {
+        const approvedProcess = { rto: Math.max(1, Math.round(recovery.proposal.rtoMinutes / 60)), rpo: Math.round(recovery.proposal.rpoMinutes / 60), mtpd: Math.max(1, Math.round(recovery.proposal.mtpdMinutes / 60)) }
+        const saved = await biaApi(`/processes/${recovery.process.id}`, { method: 'PATCH', body: JSON.stringify({ ...recovery.process, ...approvedProcess, mbco: `${recovery.proposal.mbcoPercent ?? 50}%` }) })
+        setProcesses((rows) => rows.map((item) => item.id === saved.id ? saved : item))
+        setDetails(saved)
+      }
+      setRecovery(null)
+    } catch (e) { setRecoveryError(e.message) } finally { setRecoveryBusy(false) }
+  }
+
   async function archiveProcess(id) {
     const current = processes.find((item) => item.id === id)
     try { const saved = await biaApi(`/processes/${id}`, { method: 'PATCH', body: JSON.stringify({ ...current, status: 'Archivé' }) }); setProcesses((rows) => rows.map((item) => item.id === id ? saved : item)) } catch (e) { setError(e.message) }
@@ -87,6 +117,8 @@ export default function ProcessesPage() {
       title="Processus métier"
       subtitle="Cartographie des processus rattachés à chaque usine, support des analyses BIA."
       actions={(
+        <div className="flex flex-wrap gap-3">
+        <Link className="flex items-center gap-2 rounded-lg border border-[#006b5f] px-5 py-2.5 font-bold text-[#006b5f]" href="/bia/process-capture"><span className="material-symbols-outlined">auto_awesome</span>Capture IA</Link>
         <button
           className="flex items-center gap-2 rounded-lg bg-[#00236f] px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:shadow-md active:scale-95"
           onClick={openCreate}
@@ -95,6 +127,7 @@ export default function ProcessesPage() {
           <span className="material-symbols-outlined">add</span>
           Nouveau processus
         </button>
+        </div>
       )}
     >
       {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -167,6 +200,8 @@ export default function ProcessesPage() {
                     <Link className="text-[#00236f] hover:underline" href={`/bia/new?processId=${process.id}`}>
                       Lancer BIA
                     </Link>
+                    <button className="text-[#444651] hover:underline" onClick={() => openDetails(process)} type="button">Détails</button>
+                    <button className="text-[#006b5f] hover:underline" onClick={() => openRecovery(process)} type="button">Objectifs IA</button>
                     <button className="text-[#444651] hover:underline" onClick={() => openEdit(process)} type="button">
                       Modifier
                     </button>
@@ -285,6 +320,42 @@ export default function ProcessesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {recovery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-lg">
+            <div className="flex items-start justify-between border-b border-[#e6e8ea] pb-4"><div><h3 className="text-xl font-bold text-[#00236f]">Objectifs de récupération IA</h3><p className="text-sm text-[#757682]">{recovery.process.name}</p></div><button onClick={() => setRecovery(null)} type="button"><span className="material-symbols-outlined">close</span></button></div>
+            {recoveryError && <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{recoveryError}</div>}
+            {recoveryBusy && !recovery.result && <p className="py-8 text-center text-sm text-[#757682]">Analyse des impacts et dépendances...</p>}
+            {recovery.result && <div className="mt-5 space-y-5">
+              <div className="flex flex-wrap items-center gap-3"><span className="rounded-full bg-[#eef6f5] px-3 py-1 text-xs font-bold text-[#006b5f]">{recovery.result.status}</span><span className="text-sm text-[#757682]">Confiance : {Math.round(recovery.result.confidence * 100)}%</span><span className="text-sm text-[#757682]">Score : {recovery.result.criticality.score}/100</span></div>
+              <div className="grid gap-4 sm:grid-cols-4">{[['rtoMinutes','RTO (min)'],['rpoMinutes','RPO (min)'],['mtpdMinutes','MTPD (min)'],['mbcoPercent','MBCO (%)']].map(([field,label]) => <label key={field} className="flex flex-col gap-1 text-sm font-semibold">{label}<input className="rounded-lg border border-[#c5c5d3] px-3 py-2" type="number" min="0" value={recovery.proposal?.[field] ?? ''} onChange={(e) => setRecovery((current) => ({ ...current, proposal: { ...current.proposal, [field]: Number(e.target.value) } }))} /></label>)}</div>
+              <div className="grid gap-4 md:grid-cols-2"><div><h4 className="font-bold">Justification</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[#444651]">{recovery.result.rationale.map((item, index) => <li key={index}>{item}</li>)}</ul></div><div><h4 className="font-bold">Avertissements</h4>{recovery.result.warnings.length ? <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[#9a5a00]">{recovery.result.warnings.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="mt-2 text-sm text-[#757682]">Aucun avertissement.</p>}</div></div>
+              {recovery.result.missingInformation.length > 0 && <div className="rounded-lg bg-[#fff8e8] p-4 text-sm"><strong>Informations manquantes :</strong> {recovery.result.missingInformation.map((item) => item.field).join(', ')}</div>}
+              <div className="flex flex-wrap justify-end gap-3 border-t border-[#e6e8ea] pt-4"><button className="rounded-lg border border-[#ba1a1a] px-4 py-2 font-semibold text-[#ba1a1a]" disabled={recoveryBusy} onClick={() => saveRecovery('REJECTED')} type="button">Rejeter</button><button className="rounded-lg border border-[#00236f] px-4 py-2 font-semibold text-[#00236f]" disabled={recoveryBusy} onClick={() => saveRecovery('HUMAN_REVIEW')} type="button">Enregistrer pour revue</button><button className="rounded-lg bg-[#006b5f] px-4 py-2 font-bold text-white" disabled={recoveryBusy || recovery.result.status === 'NEEDS_CLARIFICATION'} onClick={() => saveRecovery('APPROVED')} type="button">Approuver et appliquer</button></div>
+            </div>}
+          </div>
+        </div>
+      )}
+
+      {details && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-lg">
+            <div className="flex items-start justify-between border-b border-[#e6e8ea] pb-4"><div><h3 className="text-xl font-bold text-[#00236f]">Détails du processus</h3><p className="text-sm text-[#757682]">Fiche métier et objectifs de récupération</p></div><button onClick={() => setDetails(null)} type="button" aria-label="Fermer"><span className="material-symbols-outlined">close</span></button></div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Nom</p><p className="mt-1 font-semibold">{details.name || 'Non renseigné'}</p></div>
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Département</p><p className="mt-1">{details.department || 'Non renseigné'}</p></div>
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Propriétaire</p><p className="mt-1">{details.owner || 'Non renseigné'}</p></div>
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Localisation</p><p className="mt-1">{details.location || 'Non renseignée'}</p></div>
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Usine</p><p className="mt-1">{getFactoryById(details.factoryId)?.name || 'Non renseignée'}</p></div>
+              <div><p className="text-xs font-bold uppercase text-[#757682]">Catégorie / statut</p><p className="mt-1">{details.category || 'Support'} · {details.status || 'Actif'}</p></div>
+            </div>
+            <div className="mt-5 rounded-lg border border-[#e6e8ea] bg-[#f8fafc] p-4"><p className="text-xs font-bold uppercase text-[#757682]">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#444651]">{details.description || 'Aucune description disponible.'}</p><p className="mt-4 text-xs font-bold uppercase text-[#757682]">Impact métier</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#444651]">{details.impact || 'Impact non renseigné.'}</p></div>
+            <div className="mt-5"><div className="flex items-center justify-between"><h4 className="font-bold text-[#00236f]">Objectifs actuels</h4><span className={`rounded-full px-3 py-1 text-xs font-bold ${badgeToneForCriticality(details.criticality)}`}>{details.criticality || 'Non définie'}</span></div><div className="mt-3 grid gap-3 sm:grid-cols-3">{[['RTO', details.rto, 'h'], ['RPO', details.rpo, 'h'], ['MTPD', details.mtpd, 'h']].map(([label,value,unit]) => <div key={label} className="rounded-lg border border-[#c5c5d3] p-3"><p className="text-xs font-bold uppercase text-[#757682]">{label}</p><p className="mt-1 text-lg font-bold text-[#00236f]">{value ?? '—'} <span className="text-sm font-normal">{unit}</span></p></div>)}</div></div>
+            <div className="mt-6 flex justify-end gap-3 border-t border-[#e6e8ea] pt-4"><button className="rounded-lg border border-[#006b5f] px-4 py-2 font-semibold text-[#006b5f]" onClick={() => { setDetails(null); openRecovery(details) }} type="button"><span className="material-symbols-outlined mr-1 align-middle text-[18px]">auto_awesome</span>Calculer les objectifs IA</button><button className="rounded-lg bg-[#00236f] px-4 py-2 font-bold text-white" onClick={() => setDetails(null)} type="button">Fermer</button></div>
           </div>
         </div>
       )}

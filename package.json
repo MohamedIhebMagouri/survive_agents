@@ -12,6 +12,7 @@
     "db:seed:bia": "node prisma/seed-bia.cjs"
   },
   "dependencies": {
+    "@google/genai": "^2.18.0",
     "@hookform/resolvers": "^5.4.0",
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-tabs": "^1.1.17",

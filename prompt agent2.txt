@@ -1,0 +1,607 @@
+Tu connais déjà parfaitement le projet SURVIVE TN et tu as participé à la conception et à l’implémentation du premier
+  agent IA de la plateforme : le Process Capture Agent.
+
+  Tu connais notamment :
+
+  - l’architecture Next.js 15 App Router ;
+  - Prisma avec MongoDB ;
+  - la structure actuelle du modèle Process ;
+  - les routes API existantes ;
+  - le fonctionnement de `python/process_capture_agent.py` ;
+  - l’utilisation de Gemini ;
+  - le passage de données JSON via stdin/stdout ;
+  - la validation Zod côté Next.js ;
+  - la gestion actuelle des erreurs et timeouts ;
+  - l’interface de capture et de confirmation humaine ;
+  - les conventions du projet.
+
+  Tu dois maintenant implémenter le deuxième agent IA de la plateforme :
+
+  # Recovery Metrics Agent
+
+  Cet agent intervient après le Process Capture Agent.
+
+  Le Process Capture Agent :
+
+  1. analyse une description utilisateur ou un formulaire ;
+  2. extrait les informations d’un processus ;
+  3. retourne un brouillon structuré ;
+  4. demande des clarifications si nécessaire ;
+  5. permet à l’utilisateur de modifier les champs ;
+  6. crée le processus dans la collection `Process` uniquement après confirmation humaine.
+
+  Le Recovery Metrics Agent doit reprendre ce fonctionnement général : il doit analyser, proposer, expliquer, demander
+  des clarifications si nécessaire et attendre une validation humaine avant toute approbation définitive.
+
+  Ne réimplémente pas le Process Capture Agent et ne modifie pas son comportement existant sauf nécessité clairement
+  justifiée.
+
+  ==================================================
+  OBJECTIF
+  ==================================================
+
+  Implémente un agent Python capable d’analyser un processus déjà créé et de proposer les objectifs de récupération
+  suivants :
+
+  - RTO : Recovery Time Objective ;
+  - RPO : Recovery Point Objective ;
+  - MTPD : Maximum Tolerable Period of Disruption ;
+  - MBCO : Minimum Business Continuity Objective, lorsque les données sont suffisantes.
+
+  Les métriques doivent être cohérentes avec les principes d’ISO 22301 et tenir compte :
+
+  - de la criticité du processus ;
+  - des impacts opérationnels ;
+  - des impacts financiers ;
+  - des impacts réglementaires ;
+  - des impacts contractuels ;
+  - des impacts réputationnels ;
+  - des dépendances internes ;
+  - des dépendances IT ;
+  - des fournisseurs et partenaires ;
+  - de la tolérance à la perte de données ;
+  - des activités minimales ;
+  - des capacités de reprise connues.
+
+  L’agent ne doit jamais approuver automatiquement une métrique critique.
+
+  ==================================================
+  RÈGLE D’ARCHITECTURE
+  ==================================================
+
+  Réutilise exactement le pattern du premier agent :
+
+  Next.js API Route
+      -> chargement des données Prisma
+      -> construction d’un payload JSON
+      -> lancement d’un script Python
+      -> transmission via stdin
+      -> lecture d’un résultat JSON via stdout
+      -> validation du résultat côté Next.js
+      -> réponse API structurée
+
+  Le nouveau script doit être :
+
+  ```text
+  python/recovery_metrics_agent.py
+
+  La nouvelle route principale doit être :
+
+  POST /api/ai/recovery-metrics
+
+  Ne crée pas une architecture indépendante ou incompatible avec celle du Process Capture Agent.
+
+  ==================================================
+  ÉTAPE 1 — ANALYSE DU CODE EXISTANT
+
+  Comme tu connais déjà le dépôt, commence par vérifier rapidement les fichiers et conventions nécessaires, puis
+  implémente directement.
+
+  Réutilise autant que possible :
+
+  - le mécanisme d’exécution Python du Process Capture Agent ;
+  - la gestion des erreurs provider ;
+  - les timeouts ;
+  - les variables d’environnement Gemini ;
+  - les conventions de logs stderr/stdout ;
+  - les schémas Zod ;
+  - le format { ok: true, result: ... } ;
+  - les conventions de réponse des routes API.
+
+  Ne duplique pas inutilement le code. Si une fonction est commune aux deux agents, extrais-la dans un utilitaire
+  partagé sans casser le premier agent.
+
+  ==================================================
+  ÉTAPE 2 — MODÈLE DE DONNÉES
+
+  Le schéma actuel contient déjà probablement les champs historiques suivants sur Process :
+
+  rto
+  rpo
+  mtpd
+  mbco
+
+  Ne les supprime pas.
+
+  Ajoute un modèle Prisma RecoveryObjective versionné et traçable.
+
+  Utilise ce modèle comme base et adapte-le aux contraintes réelles du schéma Prisma MongoDB :
+
+  model RecoveryObjective {
+    id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+    processId          String   @db.ObjectId
+
+    rtoMinutes         Int
+    rpoMinutes         Int
+    mtpdMinutes        Int
+    mbcoPercent        Int?
+
+    status             String
+    version            Int      @default(1)
+
+    confidence         Float?
+    criticalityScore   Int?
+
+    rationale          String?
+    assumptions        Json?
+    evidence           Json?
+    warnings           Json?
+    missingInformation Json?
+    questions          Json?
+
+    inputSnapshot      Json?
+    impactSnapshot     Json?
+    dependencySnapshot Json?
+
+    source             String
+    proposedBy         String?
+    reviewedBy         String?
+    reviewedAt         DateTime?
+    rejectionReason    String?
+
+    createdAt          DateTime @default(now())
+    updatedAt          DateTime @updatedAt
+
+    process Process @relation(fields: [processId], references: [id])
+
+    @@index([processId, status])
+  }
+
+  Ajoute la relation inverse dans Process.
+
+  Les statuts doivent au minimum être :
+
+  PROPOSED
+  NEEDS_CLARIFICATION
+  HUMAN_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+  ERROR
+
+  Les valeurs historiques de Process.rto, Process.rpo et Process.mtpd restent compatibles avec l’existant.
+
+  Une synchronisation vers Process ne doit être réalisée qu’après approbation humaine.
+
+  ==================================================
+  ÉTAPE 3 — CONTRAT D’ENTRÉE PYTHON
+
+  Le script Python doit recevoir un JSON via stdin, de la même manière que process_capture_agent.py.
+
+  Format attendu :
+
+  {
+    "process": {
+      "id": "...",
+      "name": "...",
+      "description": "...",
+      "department": "...",
+      "owner": "...",
+      "location": "...",
+      "impact": "...",
+      "criticality": "low|medium|high|critical",
+      "rto": 24,
+      "rpo": 4,
+      "mtpd": 72,
+      "mbco": "50%",
+      "factoryId": "...",
+      "category": "...",
+      "status": "...",
+      "activitesCritiques": {}
+    },
+    "biaReports": [],
+    "context": {
+      "factory": {},
+      "relatedProcesses": [],
+      "existingRecoveryObjectives": [],
+      "currentDate": "YYYY-MM-DD"
+    },
+    "mode": "calculate|recalculate|clarification",
+    "clarifications": []
+  }
+
+  Le script doit accepter les champs absents ou null, mais les signaler explicitement.
+
+  ==================================================
+  ÉTAPE 4 — CONTRAT DE SORTIE PYTHON
+
+  Le script doit écrire un seul JSON valide sur stdout.
+
+  Tous les logs doivent être envoyés sur stderr.
+
+  Format attendu :
+
+  {
+    "ok": true,
+    "result": {
+      "status": "PROPOSED",
+      "processId": "...",
+
+      "proposal": {
+        "rtoMinutes": 240,
+        "rpoMinutes": 60,
+        "mtpdMinutes": 480,
+        "mbcoPercent": 50
+      },
+
+      "metricMetadata": {
+        "rto": {
+          "source": "business_rule",
+          "confidence": 0.82,
+          "evidence": "..."
+        },
+        "rpo": {
+          "source": "ai_inference",
+          "confidence": 0.70,
+          "evidence": "..."
+        },
+        "mtpd": {
+          "source": "bia_report",
+          "confidence": 0.90,
+          "evidence": "..."
+        }
+      },
+
+      "criticality": {
+        "level": "critical",
+        "score": 86,
+        "factors": [
+          {
+            "name": "operational_impact",
+            "score": 90,
+            "evidence": "..."
+          }
+        ]
+      },
+
+      "confidence": 0.82,
+
+      "rationale": [
+        "...",
+        "..."
+      ],
+
+      "assumptions": [
+        "..."
+      ],
+
+      "evidence": [
+        {
+          "source": "process.impact",
+          "field": "impact",
+          "value": "...",
+          "interpretation": "..."
+        }
+      ],
+
+      "warnings": [],
+
+      "missingInformation": [
+        {
+          "field": "dependencies",
+          "reason": "...",
+          "blocking": false
+        }
+      ],
+
+      "questions": [
+        {
+          "id": "dependency_recovery_time",
+          "field": "dependencies",
+          "question": "...",
+          "type": "text|number|single_choice|confirmation",
+          "options": []
+        }
+      ],
+
+      "constraints": {
+        "rpoLessOrEqualRto": true,
+        "rtoLessOrEqualMtpd": true,
+        "allValuesPositive": true
+      },
+
+      "inputSnapshot": {},
+      "impactSnapshot": {},
+      "dependencySnapshot": {}
+    }
+  }
+
+  Crée un schéma Zod correspondant dans :
+
+  lib/ai/recovery-metrics-schema.js
+
+  ==================================================
+  ÉTAPE 5 — MÉTHODE DE CALCUL
+
+  Implémente une approche hybride :
+
+  1. extraction et interprétation par Gemini ;
+  2. règles métier déterministes en Python ;
+  3. validation finale côté Python ;
+  4. validation supplémentaire côté Next.js.
+
+  Le modèle IA ne doit jamais être utilisé seul pour garantir les contraintes mathématiques.
+
+  ### Contraintes impératives
+
+  0 <= RPO <= RTO <= MTPD
+
+  Les valeurs doivent être exprimées en minutes dans RecoveryObjective.
+
+  ### Calcul du MTPD
+
+  Utilise en priorité :
+
+  - la matrice d’impact BIA ;
+  - la première période à partir de laquelle l’impact devient inacceptable ;
+  - les obligations réglementaires ;
+  - les engagements contractuels ;
+  - l’impact financier ;
+  - l’impact opérationnel ;
+  - les activités minimales.
+
+  ### Calcul du RTO
+
+  Tiens compte :
+
+  - de la criticité ;
+  - du MTPD ;
+  - du délai avant impact critique ;
+  - des dépendances ;
+  - de la présence de solutions manuelles ;
+  - du niveau minimal de service ;
+  - des capacités de reprise connues.
+
+  Heuristiques initiales :
+
+  critical : 60 à 240 minutes
+  high     : 240 à 720 minutes
+  medium   : 720 à 1440 minutes
+  low      : 1440 à 4320 minutes
+
+  Ces intervalles sont des règles de proposition et ne doivent pas être présentés comme des valeurs imposées directement
+  par ISO 22301.
+
+  ### Calcul du RPO
+
+  Tiens compte :
+
+  - de la fréquence des transactions ;
+  - de la fréquence de mise à jour ;
+  - de la perte de données acceptable ;
+  - des obligations réglementaires ;
+  - de l’existence de réplication ou sauvegardes ;
+  - de la capacité de reconstitution manuelle.
+
+  Heuristiques initiales :
+
+  données critiques/réglementées : 0 à 60 minutes
+  transactions fréquentes         : 15 à 60 minutes
+  activité quotidienne             : 60 à 240 minutes
+  activité peu fréquente           : jusqu’à 1440 minutes
+
+  ### Dépendances
+
+  Pour chaque dépendance :
+
+  - identifier son type ;
+  - identifier son caractère critique ;
+  - évaluer son influence sur le RTO ;
+  - signaler les dépendances sans objectif de reprise connu ;
+  - générer une question si une dépendance critique est incomplète.
+
+  ### Niveau de confiance
+
+  La confiance doit diminuer lorsque :
+
+  - la criticité est absente ;
+  - l’impact est uniquement textuel et non quantifié ;
+  - les dépendances sont inconnues ;
+  - le rapport BIA est ancien ;
+  - les contraintes réglementaires ne sont pas précises ;
+  - les valeurs sont principalement inférées.
+
+  ==================================================
+  ÉTAPE 6 — GESTION DES INCERTITUDES
+
+  Le comportement doit rester cohérent avec le Process Capture Agent.
+
+  Retourne NEEDS_CLARIFICATION lorsque des informations indispensables manquent.
+
+  Retourne HUMAN_REVIEW lorsque :
+
+  - une proposition peut être calculée ;
+  - mais son niveau de confiance est inférieur au seuil défini ;
+  - ou un impact réglementaire existe ;
+  - ou le processus est critical ;
+  - ou des dépendances critiques sont incertaines ;
+  - ou les métriques proposées diffèrent fortement des valeurs historiques.
+
+  Ne jamais inventer silencieusement :
+
+  - une dépendance ;
+  - une obligation réglementaire ;
+  - un délai contractuel ;
+  - un impact financier ;
+  - une capacité technique.
+
+  Chaque valeur doit être classée comme :
+
+  user_input
+  bia_report
+  business_rule
+  ai_inference
+  default
+  unresolved
+
+  ==================================================
+  ÉTAPE 7 — ROUTE NEXT.JS
+
+  Crée :
+
+  app/api/ai/recovery-metrics/route.js
+
+  La route doit :
+
+  1. valider la requête ;
+  2. charger le processus depuis Prisma ;
+  3. charger le rapport BIA associé, si disponible ;
+  4. charger les informations utiles sur les processus liés ;
+  5. construire le payload Python ;
+  6. lancer python/recovery_metrics_agent.py ;
+  7. appliquer un timeout ;
+  8. gérer les erreurs Python/Gemini ;
+  9. valider la sortie avec Zod ;
+  10. retourner le résultat sans l’approuver automatiquement.
+
+  Utilise des codes d’erreur cohérents avec le premier agent :
+
+  RECOVERY_METRICS_INPUT_ERROR
+  RECOVERY_METRICS_PROCESS_NOT_FOUND
+  RECOVERY_METRICS_OUTPUT_ERROR
+  RECOVERY_METRICS_TIMEOUT
+  RECOVERY_METRICS_PROVIDER_ERROR
+  RECOVERY_METRICS_INCONSISTENT_RESULT
+  RECOVERY_METRICS_INTERNAL_ERROR
+
+  Réutilise autant que possible l’utilitaire d’exécution Python déjà utilisé par le Process Capture Agent.
+
+  ==================================================
+  ÉTAPE 8 — PERSISTANCE ET VALIDATION HUMAINE
+
+  Ajoute les routes :
+
+  POST /api/bia/processes/[id]/recovery-objectives
+  GET  /api/bia/processes/[id]/recovery-objectives
+  PATCH /api/bia/recovery-objectives/[id]
+  POST /api/bia/recovery-objectives/[id]/approve
+  POST /api/bia/recovery-objectives/[id]/reject
+
+  Fonctionnement :
+
+  - le calcul IA produit une proposition ;
+  - l’utilisateur peut la modifier ;
+  - l’utilisateur peut l’approuver ;
+  - l’utilisateur peut la rejeter avec une raison ;
+  - une nouvelle proposition crée une nouvelle version ;
+  - une version approuvée ne doit jamais être écrasée ;
+  - l’approbation est enregistrée avec utilisateur et date ;
+  - la proposition conserve les snapshots, preuves et hypothèses.
+
+  Lors de l’approbation :
+
+  RecoveryObjective.status = APPROVED
+
+  Puis, si compatible avec l’existant :
+
+  Process.rto   = approved.rtoMinutes converti en heures
+  Process.rpo   = approved.rpoMinutes converti en heures
+  Process.mtpd  = approved.mtpdMinutes converti en heures
+
+  Documente clairement les éventuelles pertes de précision liées à la conversion en heures.
+
+  ==================================================
+  ÉTAPE 9 — INTERFACE UTILISATEUR
+
+  Ajoute une interface de revue cohérente avec l’interface existante du Process Capture Agent.
+
+  Elle doit afficher :
+
+  - les valeurs actuelles ;
+  - les valeurs proposées ;
+  - les écarts ;
+  - la confiance ;
+  - les sources ;
+  - les preuves ;
+  - les hypothèses ;
+  - les warnings ;
+  - les questions en attente ;
+  - les dépendances prises en compte.
+
+  Actions :
+
+  Recalculer
+  Modifier
+  Approuver
+  Rejeter
+  Demander des précisions
+
+  L’interface ne doit jamais présenter une proposition IA comme une valeur validée.
+
+  ==================================================
+  ÉTAPE 10 — TESTS
+
+  Ajoute des tests pour :
+
+  - processus critique avec impacts complets ;
+  - processus high, medium et low ;
+  - absence de rapport BIA ;
+  - absence de dépendances ;
+  - dépendance critique incomplète ;
+  - impact réglementaire ;
+  - RPO supérieur au RTO ;
+  - RTO supérieur au MTPD ;
+  - valeurs négatives ;
+  - sortie Gemini invalide ;
+  - timeout Gemini ;
+  - demande de clarification ;
+  - proposition nécessitant une validation humaine ;
+  - approbation ;
+  - rejet ;
+  - nouvelle version ;
+  - synchronisation après approbation.
+
+  Exécute les tests existants du projet afin de vérifier que le Process Capture Agent n’est pas régressé.
+
+  ==================================================
+  ÉTAPE 11 — DOCUMENTATION
+
+  Mets à jour README.md avec :
+
+  - le rôle du Recovery Metrics Agent ;
+  - son lien avec le Process Capture Agent ;
+  - le flux complet ;
+  - le format stdin/stdout ;
+  - les statuts ;
+  - les règles RPO/RTO/MTPD ;
+  - les variables d’environnement ;
+  - les commandes de test ;
+  - le workflow de validation humaine ;
+  - les limites de l’automatisation ;
+  - le rappel qu’une validation métier est nécessaire pour ISO 22301.
+
+  ==================================================
+  RÈGLES IMPORTANTES
+
+  - Ne casse pas le Process Capture Agent existant.
+  - Ne supprime aucune donnée existante.
+  - Ne mets aucune clé API dans le code.
+  - Ne fais pas confiance à une réponse Gemini sans validation.
+  - Ne laisse jamais une valeur incohérente atteindre la base.
+  - Ne crée jamais automatiquement un objectif APPROVED.
+  - Ne remplace pas silencieusement les valeurs historiques.
+  - Conserve les preuves, hypothèses et snapshots.
+  - Utilise des minutes comme unité interne canonique.
+  - Garde une sortie JSON pure sur stdout.
+  - Envoie les logs uniquement sur stderr.
+  - Respecte le style et les conventions déjà utilisés pour le premier agent.

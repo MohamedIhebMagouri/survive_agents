@@ -36,6 +36,19 @@ model Factory {
   city        String?
   country     String?
   address     String?
+  postalCode  String?
+  region      String?
+  managerName String?
+  phoneNumber String?
+  email       String?
+  website     String?
+  surfaceArea Float?
+  employeeCount Int?
+  operatingHours Json?
+  timezone    String?
+  criticalityLevel String?
+  certifications String[] @default([])
+  complianceStandards String[] @default([])
   isActive    Boolean  @default(true)
   createdById String?  @db.ObjectId
   managerId   String?  @db.ObjectId
@@ -45,6 +58,7 @@ model Factory {
   manager   User? @relation("ManagedFactories", fields: [managerId], references: [id])
   createdBy User? @relation("CreatedFactories", fields: [createdById], references: [id])
   processes Process[]
+  biaReports BiaReport[] @relation("FactoryReports")
 
   @@map("factories")
 }
@@ -64,6 +78,40 @@ model Process {
   mbco             String?  @default("50%")
   factoryId        String?  @db.ObjectId
   activitesCritiques Json?
+  ownerRole          String?
+  ownerEmail         String?
+  ownerPhone         String?
+  interimManagers    Json?
+  criticalTimes      String?
+  financialImpact    String?
+  operationalImpact  String?
+  reputationImpact   String?
+  operationalCapacityImpact String?
+  mainFunctionality  String?
+  productDependencies String?
+  interServiceDependencies String?
+  externalSuppliers  String?
+  supplierTasks      String?
+  supplierContact    String?
+  supplierContinuityPlan Boolean @default(false)
+  hasSLAClause       Boolean @default(false)
+  supplierRTO        Int?
+  supplierMTPD       Int?
+  legalObligations   String?
+  legalReferences    String?
+  legalAuthority     String?
+  legalDetails       String?
+  nonComplianceConsequences String?
+  itSystems          String?
+  systemCriticality  String?
+  systemImpact       String?
+  supportedActivities String?
+  hasBackupSystems   Boolean @default(false)
+  systemRTO          Int?
+  systemRPO          Int?
+  systemMTPD         Int?
+  workarounds        String?
+  previousIncidents  String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -82,8 +130,22 @@ model BiaReport {
   continuityLevel     Int
   recommendationCount Int
   reportData          Json?
+  continuityLevelText String?
+  riskCount           Int      @default(0)
+  content             String?
+  fileName            String?
+  filePath            String?
+  fileSize            Int      @default(0)
+  mimeType             String?
+  generationParams     Json?
+  isPublic             Boolean  @default(false)
+  expiresAt            DateTime?
+  downloadCount        Int      @default(0)
+  tags                 String[] @default([])
+  category             String?
   includedProcessIds  String[]
   factoryId           String?  @db.ObjectId
+  factory             Factory? @relation("FactoryReports", fields: [factoryId], references: [id])
   authorId            String   @db.ObjectId
   shareToken          String   @unique
   createdAt           DateTime @default(now())

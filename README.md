@@ -17,6 +17,8 @@ npm install
 npm run dev
 ```
 
+The process-capture agent runs in Python. Use Python 3.10 or newer, ensure it is available as `python` on Windows (`python3` on Linux/macOS), and configure `GEMINI_API_KEY` in `.env`. Set `PYTHON_BIN` when the interpreter is installed under a custom command or path.
+
 ## Available Routes
 
 - `/` or `/landing` - Landing page

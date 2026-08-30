@@ -24,14 +24,22 @@ const steps = [
 
 function emptyImpactMatrix() {
   const matrix = {}
-  interruptionPeriods.forEach((period, periodIndex) => {
+  interruptionPeriods.forEach((period) => {
     matrix[period] = {}
     impactCategories.forEach((category) => {
-      // Sévérité par défaut progressive selon la période d'interruption
-      matrix[period][category.key] = Math.min(100, 10 + periodIndex * 8)
+      matrix[period][category.key] = 0
     })
   })
   return matrix
+}
+
+function splitLines(value) { return String(value || '').split('\n').map((item) => item.trim()).filter(Boolean) }
+
+function calculateImpactScores(matrix) {
+  return Object.fromEntries(impactCategories.map((category) => {
+    const progression = interruptionPeriods.map((period) => Number(matrix[period]?.[category.key] || 0))
+    return [category.key, Math.max(0, ...progression)]
+  }))
 }
 
 export default function NewBiaPage() {
@@ -67,16 +75,27 @@ export default function NewBiaPage() {
   const [existingMeasures, setExistingMeasures] = useState('')
 
   const [recommendations, setRecommendations] = useState([{ text: '', priority: 'Moyenne', owner: '' }])
+  const [aiRecommendations, setAiRecommendations] = useState(null)
+  const [recommendationsBusy, setRecommendationsBusy] = useState(false)
+  const [recommendationsError, setRecommendationsError] = useState('')
 
   useEffect(() => { Promise.all([biaApi('/processes'), biaApi('/factories')]).then(([processRows, factoryRows]) => { setProcesses(processRows); setFactories(factoryRows); setProcessId((value) => value || processRows[0]?.id || '') }).catch((e) => setError(e.message)) }, [])
 
   const selectedProcess = processes.find((process) => process.id === processId)
   const selectedFactory = selectedProcess ? factories.find((factory) => factory.id === selectedProcess.factoryId) : null
 
+  useEffect(() => {
+    if (!selectedProcess) return
+    setRto(`${selectedProcess.rto ?? 24}h`)
+    setRpo(`${selectedProcess.rpo ?? 4}h`)
+    setMtpd(`${selectedProcess.mtpd ?? 72}h`)
+    setMbco(String(selectedProcess.mbco ?? '50%').endsWith('%') ? String(selectedProcess.mbco ?? '50%') : `${selectedProcess.mbco ?? 50}%`)
+  }, [selectedProcess])
+
   const globalScore = useMemo(() => {
-    const values = Object.values(impactMatrix).flatMap((periodScores) => Object.values(periodScores))
+    const values = Object.values(calculateImpactScores(impactMatrix))
     if (values.length === 0) return 0
-    return Math.round(values.reduce((sum, value) => sum + Number(value || 0), 0) / values.length)
+    return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
   }, [impactMatrix])
 
   const criticality = getCriticality(globalScore)
@@ -104,6 +123,17 @@ export default function NewBiaPage() {
     setRecommendations((current) => current.filter((_, itemIndex) => itemIndex !== index))
   }
 
+  async function generateRecommendations() {
+    if (!selectedProcess) { setRecommendationsError('Sélectionnez un processus.'); return }
+    setRecommendationsBusy(true); setRecommendationsError('')
+    try {
+      const response = await fetch('/api/ai/bia-recommendations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bia: { processId, processName: selectedProcess.name, factoryId: selectedProcess.factoryId, objective, owner, version, analysisDate, analyst, globalScore, impactScores: calculateImpactScores(impactMatrix), impactMatrix, resources: selectedResources, dependencies: Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, splitLines(value)])), minimalActivities, minimalLevel, rto, rpo, mtpd, mbco, consequences, existingMeasures, recommendations }, mode: aiRecommendations ? 'regenerate' : 'generate', clarifications: [] }) })
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || payload.error || 'Génération impossible')
+      setAiRecommendations(payload.data)
+      setRecommendations(payload.data.recommendations.map((item) => ({ text: item.title + (item.description ? ` — ${item.description}` : ''), priority: item.priority, owner: item.suggestedOwner, category: item.category, status: item.status, implementationDelay: item.implementationDelay, estimatedEffort: item.estimatedEffort, isoReferences: item.isoReferences, evidence: item.evidence, rationale: item.rationale, assumptions: item.assumptions, dependencies: item.dependencies, confidence: item.confidence, source: 'BIA Recommendations Agent' })))
+    } catch (error) { setRecommendationsError(error.message) } finally { setRecommendationsBusy(false) }
+  }
+
   function goNext() {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1))
   }
@@ -114,12 +144,9 @@ export default function NewBiaPage() {
 
   async function saveBia() {
     if (!selectedProcess) { setError('Sélectionnez un processus'); return }
-    const impactScores = Object.fromEntries(impactCategories.map((category) => {
-      const scores = interruptionPeriods.map((period) => Number(impactMatrix[period][category.key] || 0))
-      return [category.key, Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)]
-    }))
-    const splitLines = (value) => value.split('\n').map((item) => item.trim()).filter(Boolean)
-    const payload = { processId, processName: selectedProcess.name, factoryId: selectedProcess.factoryId, objective, owner, version, analysisDate, analyst, globalScore, impactScores, impactMatrix, resources: selectedResources, dependencies: Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, splitLines(value)])), minimalActivities, minimalLevel, rto, rpo, mtpd, mbco, consequences, existingMeasures, recommendations: recommendations.filter((item) => item.text.trim()) }
+    const impactScores = calculateImpactScores(impactMatrix)
+    const savedRecommendations = recommendations.filter((item) => String(item.text || '').trim()).map((item) => ({ ...item, text: String(item.text).trim(), priority: item.priority || 'Moyenne', owner: item.owner || 'À désigner' }))
+    const payload = { processId, processName: selectedProcess.name, factoryId: selectedProcess.factoryId, objective, owner, version, analysisDate, analyst, globalScore, impactScores, impactMatrix, resources: selectedResources, dependencies: Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, splitLines(value)])), minimalActivities, minimalLevel, rto, rpo, mtpd, mbco, consequences, existingMeasures, recommendations: savedRecommendations, aiRecommendations }
     try { setSaving(true); const saved = await biaApi('/reports', { method: 'POST', body: JSON.stringify(payload) }); router.push(`/bia/${saved.id}`) } catch (e) { setError(e.message); setSaving(false) }
   }
 
@@ -341,23 +368,28 @@ export default function NewBiaPage() {
           )}
 
           {currentStep.key === 'objectives' && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-4">
+              <div className="rounded-lg border border-[#6df5e1] bg-[#eef6f5] p-4 text-sm text-[#006b5f]">
+                Ces objectifs proviennent du processus sélectionné. Pour les modifier, utilisez l’action « Objectifs IA » dans la liste des processus, puis approuvez les nouvelles valeurs.
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {[
-                { label: 'RTO — Recovery Time Objective', value: rto, setter: setRto, hint: 'Délai maximal de reprise' },
-                { label: 'RPO — Recovery Point Objective', value: rpo, setter: setRpo, hint: 'Perte de données maximale tolérée' },
-                { label: 'MTPD — Maximum Tolerable Period of Disruption', value: mtpd, setter: setMtpd, hint: "Durée d'interruption maximale tolérable" },
-                { label: 'MBCO — Minimum Business Continuity Objective', value: mbco, setter: setMbco, hint: 'Niveau minimal de service' },
+                { label: 'RTO — Recovery Time Objective', value: rto, hint: 'Délai maximal de reprise' },
+                { label: 'RPO — Recovery Point Objective', value: rpo, hint: 'Perte de données maximale tolérée' },
+                { label: 'MTPD — Maximum Tolerable Period of Disruption', value: mtpd, hint: "Durée d'interruption maximale tolérable" },
+                { label: 'MBCO — Minimum Business Continuity Objective', value: mbco, hint: 'Niveau minimal de service' },
               ].map((field) => (
                 <label key={field.label} className="flex flex-col gap-1 text-[13px] font-semibold text-[#444651]">
                   {field.label}
                   <input
-                    className="rounded-lg border border-[#c5c5d3] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#00236f]"
-                    onChange={(event) => field.setter(event.target.value)}
+                    className="cursor-not-allowed rounded-lg border border-[#c5c5d3] bg-[#f2f4f6] px-3 py-2 text-sm text-[#444651]"
+                    readOnly
                     value={field.value}
                   />
                   <span className="text-[11px] font-normal text-[#757682]">{field.hint}</span>
                 </label>
               ))}
+              </div>
             </div>
           )}
 
@@ -387,6 +419,9 @@ export default function NewBiaPage() {
 
           {currentStep.key === 'recommendations' && (
             <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#6df5e1] bg-[#eef6f5] p-4"><div><h3 className="font-bold text-[#006b5f]">Recommandations SMCA / ISO 22301</h3><p className="mt-1 text-sm text-[#444651]">L’agent analyse les sept sections précédentes. Chaque recommandation reste modifiable et soumise à validation humaine.</p></div><button className="flex items-center gap-2 rounded-lg bg-[#00236f] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50" disabled={recommendationsBusy} onClick={generateRecommendations} type="button"><span className="material-symbols-outlined">auto_awesome</span>{recommendationsBusy ? 'Analyse en cours...' : aiRecommendations ? 'Régénérer' : 'Générer les recommandations IA'}</button></div>
+              {recommendationsError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{recommendationsError}</div>}
+              {aiRecommendations && <div className="space-y-4 rounded-lg border border-[#c5c5d3] p-4"><div className="flex flex-wrap items-center gap-4"><span className="rounded-full bg-[#00236f]/10 px-3 py-1 text-xs font-bold text-[#00236f]">{aiRecommendations.status}</span><span className="text-sm font-semibold">Score : {aiRecommendations.overallAssessment.score}/100</span><span className="text-sm text-[#757682]">Confiance : {Math.round(aiRecommendations.confidence * 100)}%</span></div><p className="text-sm leading-6 text-[#444651]">{aiRecommendations.summary}</p>{aiRecommendations.gaps.length > 0 && <div><h4 className="text-sm font-bold text-[#9a5a00]">Écarts identifiés</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{aiRecommendations.gaps.map((gap, index) => <li key={`${gap.title}-${index}`}><strong>{gap.severity} :</strong> {gap.description}</li>)}</ul></div>}{aiRecommendations.warnings.length > 0 && <div className="rounded-lg bg-[#fff8e8] p-3 text-sm text-[#9a5a00]">{aiRecommendations.warnings.join(' ')}</div>}</div>}
               {recommendations.map((recommendation, index) => (
                 <div key={index} className="grid grid-cols-1 gap-3 rounded-lg border border-[#c5c5d3] p-4 sm:grid-cols-[1fr_140px_160px_40px]">
                   <input
@@ -400,9 +435,10 @@ export default function NewBiaPage() {
                     onChange={(event) => updateRecommendation(index, 'priority', event.target.value)}
                     value={recommendation.priority}
                   >
-                    <option>Haute</option>
+                    <option>Critique</option>
+                    <option>Élevée</option>
                     <option>Moyenne</option>
-                    <option>Basse</option>
+                    <option>Faible</option>
                   </select>
                   <input
                     className="rounded-lg border border-[#c5c5d3] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#00236f]"

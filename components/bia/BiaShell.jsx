@@ -19,6 +19,7 @@ export const biaSubNav = [
   { key: 'dashboard', label: 'Tableau de bord', icon: 'space_dashboard', to: '/bia' },
   { key: 'factories', label: 'Usines', icon: 'factory', to: '/bia/factories' },
   { key: 'processes', label: 'Processus', icon: 'account_tree', to: '/bia/processes' },
+  { key: 'capture', label: 'Capture IA', icon: 'auto_awesome', to: '/bia/process-capture' },
   { key: 'new', label: 'Nouveau BIA', icon: 'add_circle', to: '/bia/new' },
   { key: 'gap', label: 'Gap Analysis', icon: 'compare_arrows', to: '/bia/gap-analysis' },
   { key: 'strategies', label: 'Stratégies', icon: 'shield', to: '/bia/strategies' },

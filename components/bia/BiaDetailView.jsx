@@ -244,8 +244,8 @@ export default function BiaDetailView({ bia, process }) {
               </tr>
             </thead>
             <tbody>
-              {bia.recommendations.map((recommendation) => (
-                <tr key={recommendation.text} className="border-b border-[#e6e8ea] last:border-0 hover:bg-[#f2f4f6]">
+              {(bia.recommendations || []).map((recommendation, index) => (
+                <tr key={recommendation.id || `${recommendation.text}-${index}`} className="border-b border-[#e6e8ea] last:border-0 hover:bg-[#f2f4f6]">
                   <td className="px-6 py-4">{recommendation.text}</td>
                   <td className="px-6 py-4">
                     <span className={`rounded-full px-3 py-1 text-[12px] font-bold ${badgeToneForCriticality(
