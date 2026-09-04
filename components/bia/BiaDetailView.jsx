@@ -25,11 +25,12 @@ function exportReport(format, bia) {
     URL.revokeObjectURL(url)
     return
   }
-  window.print()
 }
 
 export default function BiaDetailView({ bia, process }) {
   const [activeTab, setActiveTab] = useState('synthese')
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [pdfError, setPdfError] = useState('')
   const factory = process?.factory || null
   const criticality = getCriticality(bia.globalScore)
 
@@ -37,6 +38,31 @@ export default function BiaDetailView({ bia, process }) {
     category: category.label,
     score: bia.impactScores?.[category.key] ?? 0,
   }))
+
+  async function generatePdf() {
+    setPdfBusy(true)
+    setPdfError('')
+    try {
+      const response = await fetch(`/api/bia/reports/${bia.id}/pdf`, { method: 'POST' })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error?.message || 'Impossible de générer le rapport PDF.')
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get('content-disposition') || ''
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `bia-${bia.id}.pdf`
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setPdfError(error.message)
+    } finally {
+      setPdfBusy(false)
+    }
+  }
 
   return (
     <BiaShell
@@ -55,15 +81,17 @@ export default function BiaDetailView({ bia, process }) {
           </button>
           <button
             className="flex items-center gap-2 rounded-lg bg-[#00236f] px-4 py-2.5 text-[14px] font-bold text-white shadow-sm hover:shadow-md"
-            onClick={() => exportReport('pdf', bia)}
+            disabled={pdfBusy}
+            onClick={generatePdf}
             type="button"
           >
             <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-            Générer le rapport PDF
+            {pdfBusy ? 'Génération Gemini...' : 'Générer le rapport PDF'}
           </button>
         </>
       )}
     >
+      {pdfError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{pdfError}</div>}
       <div className="flex flex-wrap items-center gap-4">
         <span className={`rounded-full px-4 py-1.5 text-[13px] font-bold ${badgeToneForCriticality(criticality)}`}>
           Criticité : {criticality}
