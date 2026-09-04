@@ -60,6 +60,7 @@ export default function ProcessCapturePage() {
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
+
   return (
     <BiaShell active="processes" title="Capture guidée d’un processus" subtitle="Décrivez le processus, vérifiez les faits extraits, puis confirmez la création." actions={<Link className="rounded-lg border border-[#c5c5d3] px-4 py-2.5 text-sm font-semibold text-[#444651]" href="/bia/processes">Retour aux processus</Link>}>
       <form className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]" onSubmit={capture}>

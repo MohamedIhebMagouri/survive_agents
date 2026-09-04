@@ -56,6 +56,7 @@ export default function DocumentExtractionForm() {
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
 
+
   function update(field, value) { setValues((current) => ({ ...current, [field]: value === '' ? null : ['rto', 'rpo', 'mtpd', 'mbco'].includes(field) ? Number(value) : value })) }
 
   return (

@@ -76,6 +76,7 @@ export default function NewBiaPage() {
 
   const [recommendations, setRecommendations] = useState([{ text: '', priority: 'Moyenne', owner: '' }])
   const [aiRecommendations, setAiRecommendations] = useState(null)
+  const [addedAiRecommendations, setAddedAiRecommendations] = useState([])
   const [recommendationsBusy, setRecommendationsBusy] = useState(false)
   const [recommendationsError, setRecommendationsError] = useState('')
 
@@ -126,7 +127,8 @@ export default function NewBiaPage() {
   function addAiRecommendation(item) {
     const text = `${item.title || ''}${item.description ? ` — ${item.description}` : ''}`.trim()
     if (!text) return
-    setRecommendations((current) => current.some((recommendation) => recommendation.text === text) ? current : [...current, { text, priority: item.priority || 'Moyenne', owner: item.suggestedOwner || '', category: item.category, source: 'BIA Recommendations Agent' }])
+    setRecommendations((current) => current.some((recommendation) => recommendation.text === text) ? current : [...current, { text, priority: item.priority || 'Moyenne', owner: item.suggestedOwner || '', category: item.category, source: 'BIA Recommendations Agent', evidence: item.evidence || [], rationale: item.rationale || '' }])
+    setAddedAiRecommendations((current) => current.includes(text) ? current : [...current, text])
   }
 
   async function generateRecommendations() {
@@ -136,6 +138,7 @@ export default function NewBiaPage() {
       const response = await fetch('/api/ai/bia-recommendations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bia: { processId, processName: selectedProcess.name, factoryId: selectedProcess.factoryId, objective, owner, version, analysisDate, analyst, globalScore, impactScores: calculateImpactScores(impactMatrix), impactMatrix, resources: selectedResources, dependencies: Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, splitLines(value)])), minimalActivities, minimalLevel, rto, rpo, mtpd, mbco, consequences, existingMeasures, recommendations }, mode: aiRecommendations ? 'regenerate' : 'generate', clarifications: [] }) })
       const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || payload.error || 'Génération impossible')
       setAiRecommendations(payload.data)
+      setAddedAiRecommendations([])
       setRecommendations([])
     } catch (error) { setRecommendationsError(error.message) } finally { setRecommendationsBusy(false) }
   }
@@ -155,6 +158,7 @@ export default function NewBiaPage() {
     const payload = { processId, processName: selectedProcess.name, factoryId: selectedProcess.factoryId, objective, owner, version, analysisDate, analyst, globalScore, impactScores, impactMatrix, resources: selectedResources, dependencies: Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, splitLines(value)])), minimalActivities, minimalLevel, rto, rpo, mtpd, mbco, consequences, existingMeasures, recommendations: savedRecommendations, aiRecommendations }
     try { setSaving(true); const saved = await biaApi('/reports', { method: 'POST', body: JSON.stringify(payload) }); router.push(`/bia/${saved.id}`) } catch (e) { setError(e.message); setSaving(false) }
   }
+
 
   const currentStep = steps[stepIndex]
 
@@ -428,7 +432,7 @@ export default function NewBiaPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#6df5e1] bg-[#eef6f5] p-4"><div><h3 className="font-bold text-[#006b5f]">Recommandations SMCA / ISO 22301</h3><p className="mt-1 text-sm text-[#444651]">L’agent analyse les sept sections précédentes. Chaque recommandation reste modifiable et soumise à validation humaine.</p></div><button className="flex items-center gap-2 rounded-lg bg-[#00236f] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50" disabled={recommendationsBusy} onClick={generateRecommendations} type="button"><span className="material-symbols-outlined">auto_awesome</span>{recommendationsBusy ? 'Analyse en cours...' : aiRecommendations ? 'Régénérer' : 'Générer les recommandations IA'}</button></div>
               {recommendationsError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{recommendationsError}</div>}
               {aiRecommendations && <div className="space-y-4 rounded-lg border border-[#c5c5d3] p-4"><div className="flex flex-wrap items-center gap-4"><span className="rounded-full bg-[#00236f]/10 px-3 py-1 text-xs font-bold text-[#00236f]">{aiRecommendations.status}</span><span className="text-sm font-semibold">Score : {aiRecommendations.overallAssessment.score}/100</span><span className="text-sm text-[#757682]">Confiance : {Math.round(aiRecommendations.confidence * 100)}%</span></div><p className="text-sm leading-6 text-[#444651]">{aiRecommendations.summary}</p>{aiRecommendations.gaps.length > 0 && <div><h4 className="text-sm font-bold text-[#9a5a00]">Écarts identifiés</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{aiRecommendations.gaps.map((gap, index) => <li key={`${gap.title}-${index}`}><strong>{gap.severity} :</strong> {gap.description}</li>)}</ul></div>}{aiRecommendations.warnings.length > 0 && <div className="rounded-lg bg-[#fff8e8] p-3 text-sm text-[#9a5a00]">{aiRecommendations.warnings.join(' ')}</div>}</div>}
-              {aiRecommendations?.recommendations?.map((item, index) => <div key={`ai-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-[#6df5e1] bg-[#f7fffd] p-3"><div><p className="font-semibold">{item.title}</p>{item.description && <p className="text-sm text-[#444651]">{item.description}</p>}</div><button className="flex shrink-0 items-center gap-1 rounded-lg bg-[#006b5f] px-3 py-2 text-sm font-bold text-white" onClick={(event) => { event.preventDefault(); event.stopPropagation(); addAiRecommendation(item) }} type="button"><span className="material-symbols-outlined text-[18px]">add</span>Ajouter</button></div>)}
+              {aiRecommendations?.recommendations?.length > 0 && <div className="space-y-2"><h4 className="text-sm font-bold text-[#006b5f]">Recommandations proposées par l’IA</h4>{aiRecommendations.recommendations.map((item, index) => { const recommendationText = `${item.title || ''}${item.description ? ` — ${item.description}` : ''}`.trim(); const alreadyAdded = addedAiRecommendations.includes(recommendationText); return <div key={`ai-${index}`} className="flex items-center justify-between gap-3 rounded-lg border-2 border-[#006b5f] bg-[#f7fffd] p-3"><div><p className="font-semibold">{item.title}</p>{item.description && <p className="text-sm text-[#444651]">{item.description}</p>}</div><button className={`flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm font-bold ${alreadyAdded ? 'bg-[#dcefeb] text-[#006b5f]' : 'bg-[#006b5f] text-white'}`} disabled={alreadyAdded} onClick={(event) => { event.preventDefault(); event.stopPropagation(); addAiRecommendation(item) }} type="button"><span className="material-symbols-outlined text-[18px]">{alreadyAdded ? 'check' : 'add'}</span>{alreadyAdded ? 'Ajoutée' : 'Ajouter'}</button></div> })}</div>}
               {recommendations.map((recommendation, index) => (
                 <div key={index} className="grid grid-cols-1 gap-3 rounded-lg border border-[#c5c5d3] p-4 sm:grid-cols-[1fr_140px_160px_40px]">
                   <input
