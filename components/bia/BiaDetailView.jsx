@@ -13,7 +13,7 @@ const tabs = [
   { key: 'recommandations', label: 'Recommandations' },
 ]
 
-function exportReport(format, bia) {
+async function exportReport(format, bia) {
   const payload = JSON.stringify(bia, null, 2)
   if (format === 'json') {
     const blob = new Blob([payload], { type: 'application/json' })
@@ -25,11 +25,21 @@ function exportReport(format, bia) {
     URL.revokeObjectURL(url)
     return
   }
-  window.print()
+  const response = await fetch(`/api/bia/reports/${bia.id}/pdf`)
+  if (!response.ok) throw new Error('Impossible de générer le rapport PDF')
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] || `rapport-bia-${bia.id}.pdf`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 export default function BiaDetailView({ bia, process }) {
   const [activeTab, setActiveTab] = useState('synthese')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [generationError, setGenerationError] = useState('')
   const factory = process?.factory || null
   const criticality = getCriticality(bia.globalScore)
 
@@ -55,15 +65,21 @@ export default function BiaDetailView({ bia, process }) {
           </button>
           <button
             className="flex items-center gap-2 rounded-lg bg-[#00236f] px-4 py-2.5 text-[14px] font-bold text-white shadow-sm hover:shadow-md"
-            onClick={() => exportReport('pdf', bia)}
+            onClick={async () => {
+              setGenerationError('')
+              setIsGenerating(true)
+              try { await exportReport('pdf', bia) } catch (error) { setGenerationError(error.message) } finally { setIsGenerating(false) }
+            }}
             type="button"
+            disabled={isGenerating}
           >
             <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-            Générer le rapport PDF
+            {isGenerating ? 'Génération...' : 'Télécharger le rapport PDF'}
           </button>
         </>
       )}
     >
+      {generationError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{generationError}</div>}
       <div className="flex flex-wrap items-center gap-4">
         <span className={`rounded-full px-4 py-1.5 text-[13px] font-bold ${badgeToneForCriticality(criticality)}`}>
           Criticité : {criticality}

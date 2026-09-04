@@ -33,7 +33,10 @@ export default function ProcessCapturePage() {
   async function capture(event) {
     event.preventDefault(); setBusy(true); setError(''); setSaved('')
     try {
-      const response = await fetch('/api/ai/process-capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'free_text', text, formData: draft }) })
+      const body = new FormData()
+      body.append('text', text)
+      body.append('formData', JSON.stringify(draft))
+      const response = await fetch('/api/ai/process-capture', { method: 'POST', body })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error?.message || payload.error || 'Capture impossible')
       const suggested = payload.data.recoveryMetrics?.proposal

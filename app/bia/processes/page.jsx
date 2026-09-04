@@ -174,6 +174,7 @@ export default function ProcessesPage() {
               <th className="px-6 py-3 font-semibold">Département</th>
               <th className="px-6 py-3 font-semibold">Propriétaire</th>
               <th className="px-6 py-3 font-semibold">Criticité</th>
+              <th className="px-6 py-3 font-semibold">MBCO</th>
               <th className="px-6 py-3 font-semibold">Statut</th>
               <th className="px-6 py-3" />
             </tr>
@@ -190,6 +191,7 @@ export default function ProcessesPage() {
                     {process.criticality}
                   </span>
                 </td>
+                <td className="px-6 py-4 font-semibold text-[#00236f]">{process.mbco ?? '—'}</td>
                 <td className="px-6 py-4">
                   <span className={`rounded-full px-3 py-1 text-[12px] font-bold ${badgeToneForStatus(process.status)}`}>
                     {process.status}
@@ -354,7 +356,7 @@ export default function ProcessesPage() {
               <div><p className="text-xs font-bold uppercase text-[#757682]">Catégorie / statut</p><p className="mt-1">{details.category || 'Support'} · {details.status || 'Actif'}</p></div>
             </div>
             <div className="mt-5 rounded-lg border border-[#e6e8ea] bg-[#f8fafc] p-4"><p className="text-xs font-bold uppercase text-[#757682]">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#444651]">{details.description || 'Aucune description disponible.'}</p><p className="mt-4 text-xs font-bold uppercase text-[#757682]">Impact métier</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#444651]">{details.impact || 'Impact non renseigné.'}</p></div>
-            <div className="mt-5"><div className="flex items-center justify-between"><h4 className="font-bold text-[#00236f]">Objectifs actuels</h4><span className={`rounded-full px-3 py-1 text-xs font-bold ${badgeToneForCriticality(details.criticality)}`}>{details.criticality || 'Non définie'}</span></div><div className="mt-3 grid gap-3 sm:grid-cols-3">{[['RTO', details.rto, 'h'], ['RPO', details.rpo, 'h'], ['MTPD', details.mtpd, 'h']].map(([label,value,unit]) => <div key={label} className="rounded-lg border border-[#c5c5d3] p-3"><p className="text-xs font-bold uppercase text-[#757682]">{label}</p><p className="mt-1 text-lg font-bold text-[#00236f]">{value ?? '—'} <span className="text-sm font-normal">{unit}</span></p></div>)}</div></div>
+            <div className="mt-5"><div className="flex items-center justify-between"><h4 className="font-bold text-[#00236f]">Objectifs actuels</h4><span className={`rounded-full px-3 py-1 text-xs font-bold ${badgeToneForCriticality(details.criticality)}`}>{details.criticality || 'Non définie'}</span></div><div className="mt-3 grid gap-3 sm:grid-cols-4">{[['RTO', details.rto, 'h'], ['RPO', details.rpo, 'h'], ['MTPD', details.mtpd, 'h'], ['MBCO', details.mbco, '']].map(([label,value,unit]) => <div key={label} className="rounded-lg border border-[#c5c5d3] p-3"><p className="text-xs font-bold uppercase text-[#757682]">{label}</p><p className="mt-1 text-lg font-bold text-[#00236f]">{value ?? '—'} <span className="text-sm font-normal">{unit}</span></p></div>)}</div></div>
             <div className="mt-6 flex justify-end gap-3 border-t border-[#e6e8ea] pt-4"><button className="rounded-lg border border-[#006b5f] px-4 py-2 font-semibold text-[#006b5f]" onClick={() => { setDetails(null); openRecovery(details) }} type="button"><span className="material-symbols-outlined mr-1 align-middle text-[18px]">auto_awesome</span>Calculer les objectifs IA</button><button className="rounded-lg bg-[#00236f] px-4 py-2 font-bold text-white" onClick={() => setDetails(null)} type="button">Fermer</button></div>
           </div>
         </div>
