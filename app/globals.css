@@ -57,4 +57,9 @@
     background: #e2e8f0;
     border-radius: 999px;
   }
+
+  aside [class*="border-[#6df5e1]"] ul,
+  aside [class*="border-[#6df5e1]"] > p {
+    display: none;
+  }
 }
