@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { PolarAngleAxis, PolarGrid, Radar, RadarChart, ResponsiveContainer } from 'recharts'
 import BiaShell, { badgeToneForCriticality, badgeToneForStatus } from '@/components/bia/BiaShell'
 import { getCriticality, impactCategories, resourceCategories } from '@/lib/bia-data'
@@ -25,7 +26,7 @@ async function exportReport(format, bia) {
     URL.revokeObjectURL(url)
     return
   }
-  const response = await fetch(`/api/bia/reports/${bia.id}/pdf`)
+  const response = await fetch(`/api/bia/reports/${bia.id}/pdf`, { method: 'POST' })
   if (!response.ok) throw new Error('Impossible de générer le rapport PDF')
   const blob = await response.blob()
   const url = URL.createObjectURL(blob)
@@ -37,11 +38,25 @@ async function exportReport(format, bia) {
 }
 
 export default function BiaDetailView({ bia, process }) {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('synthese')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationError, setGenerationError] = useState('')
   const factory = process?.factory || null
   const criticality = getCriticality(bia.globalScore)
+
+  async function deleteAnalysis() {
+    if (!window.confirm('Supprimer définitivement cette analyse BIA ?')) return
+    setGenerationError('')
+    try {
+      const response = await fetch(`/api/bia/reports/${bia.id}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Impossible de supprimer l’analyse BIA')
+      router.push('/bia')
+      router.refresh()
+    } catch (error) {
+      setGenerationError(error.message)
+    }
+  }
 
   const radarData = impactCategories.map((category) => ({
     category: category.label,
@@ -62,6 +77,14 @@ export default function BiaDetailView({ bia, process }) {
           >
             <span className="material-symbols-outlined text-[18px]">data_object</span>
             Export JSON
+          </button>
+          <button
+            className="flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-[14px] font-semibold text-red-700 hover:bg-red-50"
+            onClick={deleteAnalysis}
+            type="button"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete</span>
+            Supprimer
           </button>
           <button
             className="flex items-center gap-2 rounded-lg bg-[#00236f] px-4 py-2.5 text-[14px] font-bold text-white shadow-sm hover:shadow-md"
